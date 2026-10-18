@@ -10,3 +10,7 @@ A database is a:
 - with a query language and execution engine on top
 - wrapped in transactional guarantees. 
 Each layer only talks to the one below it
+
+## Resources
+1. Bitcask paper [link](https://riak.com/assets/bitcask-intro.pdf)
+2. Cstask tutorial [link](https://cstack.github.io/db_tutorial)
