@@ -3,3 +3,6 @@ baobab
 *.o
 *.log
 baobab_test
+db
+*.db
+*.dSYM/

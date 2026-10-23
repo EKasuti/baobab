@@ -14,10 +14,17 @@ baobab_test: $(TEST_OBJS)
 test: baobab_test
 	./baobab_test
 
+# cstack db_tutorial build
+db: db.cpp
+	$(CXX) $(CXXFLAGS) -o $@ db.cpp
+
+spec: db
+	rspec
+
 %.o: %.cpp log.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f baobab baobab_test *.o
+	rm -rf baobab baobab_test db *.o *.dSYM
 
-.PHONY: test clean
+.PHONY: test spec clean
