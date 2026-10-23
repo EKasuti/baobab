@@ -28,6 +28,20 @@ Each layer only talks to the one below it
         -  it's the layer that differs depending on which operating system sqlite was compiled for
 
 
+## Record format
+Every write appends one record to the log file (integers in native byte order):
+
+| field   | size        | notes                              |
+|---------|-------------|------------------------------------|
+| crc32   | 4 bytes     | over every byte after this field   |
+| type    | 1 byte      | 1 = PUT, 0 = DELETE (tombstone)    |
+| key_len | 2 bytes     | keys up to 65,535 bytes            |
+| val_len | 4 bytes     | 0 for a tombstone                  |
+| key     | key_len     |                                    |
+| value   | val_len     |                                    |
+
+Header is 11 bytes, so a record is `11 + key_len + val_len` bytes.
+
 ## Resources
 1. Bitcask paper [link](https://riak.com/assets/bitcask-intro.pdf)
 2. Cstask tutorial [link](https://cstack.github.io/db_tutorial)
