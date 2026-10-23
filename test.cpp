@@ -9,20 +9,32 @@
 
 const char* TEST_FILE = "test-000001.log";
 
-void check(bool ok, const std::string& what) {
+int checks_passed = 0;
+
+// Stops the run on failure; prints nothing on success (for checks in loops).
+void require(bool ok, const std::string& what) {
     if (!ok) {
-        printf("FAIL: %s\n", what.c_str());
+        printf("  FAIL: %s\n", what.c_str());
         exit(EXIT_FAILURE);
     }
+    checks_passed++;
+}
+
+void pass(const std::string& what) { printf("  PASS: %s\n", what.c_str()); }
+
+void check(bool ok, const std::string& what) {
+    require(ok, what);
+    pass(what);
 }
 
 off_t file_size(const char* filename) {
     struct stat st;
-    check(stat(filename, &st) == 0, "stat");
+    require(stat(filename, &st) == 0, "stat");
     return st.st_size;
 }
 
 void test_round_trip() {
+    printf("test_round_trip\n");
     Record source = {RECORD_PUT, "hello", "world"};
     std::vector<uint8_t> buffer(record_size(&source));
     check(buffer.size() == HEADER_SIZE + 5 + 5, "record size");
@@ -44,6 +56,7 @@ void test_round_trip() {
 }
 
 void test_put_get_delete() {
+    printf("test_put_get_delete\n");
     unlink(TEST_FILE);
     Log* log = log_open(TEST_FILE);
 
@@ -52,16 +65,19 @@ void test_put_get_delete() {
         std::string key = "key" + std::to_string(i);
         std::string value = "val" + std::to_string(i);
         off_t before = file_size(TEST_FILE);
-        check(log_put(log, key, value), "put " + key);
-        check(file_size(TEST_FILE) - before == (off_t)(HEADER_SIZE + key.size() + value.size()),
-              "file grew by record size for " + key);
+        require(log_put(log, key, value), "put " + key);
+        require(file_size(TEST_FILE) - before == (off_t)(HEADER_SIZE + key.size() + value.size()),
+                "file grew by record size for " + key);
     }
+    pass("1000 puts, file grew by exactly one record each (" +
+         std::to_string(file_size(TEST_FILE)) + " bytes)");
 
     std::string value;
     for (int i = 0; i < 1000; i++) {
         std::string key = "key" + std::to_string(i);
-        check(log_get(log, key, &value) && value == "val" + std::to_string(i), "get " + key);
+        require(log_get(log, key, &value) && value == "val" + std::to_string(i), "get " + key);
     }
+    pass("1000 gets returned the right value");
 
     check(log_put(log, "key5", "new"), "overwrite");
     check(log_get(log, "key5", &value) && value == "new", "overwrite returns latest");
@@ -79,6 +95,6 @@ void test_put_get_delete() {
 int main() {
     test_round_trip();
     test_put_get_delete();
-    printf("All tests passed.\n");
+    printf("All tests passed (%d checks).\n", checks_passed);
     return EXIT_SUCCESS;
 }
