@@ -153,6 +153,7 @@ ExecuteResult execute_statement(Statement* statement, Log* log) {
 
 int main() {
     Log* log = log_open(DATA_FILE);
+    printf("Loaded %zu keys from %s\n", log->index.size(), DATA_FILE);
     InputBuffer* input_buffer = new_input_buffer();
     while (true) {
         print_prompt();

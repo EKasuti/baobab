@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 #include <zlib.h>
@@ -64,8 +65,68 @@ DeserializeResult deserialize_record(void* source, uint32_t available, Record* d
     return DESERIALIZE_SUCCESS;
 }
 
+static std::vector<uint8_t> read_file(int fd) {
+    struct stat st;
+    if (fstat(fd, &st) == -1) {
+        printf("Unable to stat log file: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    std::vector<uint8_t> contents(st.st_size);
+    size_t total_read = 0;
+    while (total_read < contents.size()) {
+        ssize_t bytes_read =
+            pread(fd, contents.data() + total_read, contents.size() - total_read, total_read);
+        if (bytes_read == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            printf("Error reading log file: %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+        if (bytes_read == 0) {
+            break;
+        }
+        total_read += bytes_read;
+    }
+    contents.resize(total_read);
+    return contents;
+}
+
+// Rebuilds the index by scanning the log front to back. Stops at the first
+// record that is short or fails its crc: that's a torn tail from a crash
+// mid-write, so it's cut off and the next append starts at the last good record.
+static void log_replay(Log* log) {
+    std::vector<uint8_t> contents = read_file(log->file_descriptor);
+
+    size_t offset = 0;
+    Record record;
+    while (offset < contents.size()) {
+        uint32_t available = contents.size() - offset;
+        if (deserialize_record(contents.data() + offset, available, &record) !=
+            DESERIALIZE_SUCCESS) {
+            break;
+        }
+        if (record.type == RECORD_PUT) {
+            log->index[record.key] = record.value;
+        } else {
+            log->index.erase(record.key);
+        }
+        offset += record_size(&record);
+    }
+
+    if (offset < contents.size()) {
+        printf("Discarding torn tail: %zu bytes after offset %zu\n", contents.size() - offset,
+               offset);
+        if (ftruncate(log->file_descriptor, offset) == -1 || fsync(log->file_descriptor) == -1) {
+            printf("Unable to truncate torn tail: %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
 Log* log_open(const char* filename) {
-    int fd = open(filename, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR);
+    int fd = open(filename, O_RDWR | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR);
     if (fd == -1) {
         printf("Unable to open file '%s': %s\n", filename, strerror(errno));
         exit(EXIT_FAILURE);
@@ -73,6 +134,7 @@ Log* log_open(const char* filename) {
 
     Log* log = new Log;
     log->file_descriptor = fd;
+    log_replay(log);
     return log;
 }
 
@@ -101,6 +163,12 @@ static bool log_append(Log* log, Record* record) {
         }
         written += bytes_written;
     }
+
+    // Not durable until it's on disk: the caller only acknowledges after this.
+    if (fsync(log->file_descriptor) == -1) {
+        printf("Error syncing: %s\n", strerror(errno));
+        return false;
+    }
     return true;
 }
 
@@ -123,8 +191,8 @@ bool log_get(Log* log, const std::string& key, std::string* value) {
 }
 
 bool log_delete(Log* log, const std::string& key) {
-    // Always write the tombstone: the key may live in older data on disk
-    // that this process hasn't loaded into the index.
+    // The tombstone is how the delete survives a restart: replay sees it after
+    // the key's earlier puts and erases the key again.
     Record record = {RECORD_DELETE, key, ""};
     if (!log_append(log, &record)) {
         return false;
