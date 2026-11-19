@@ -21,10 +21,17 @@ db: db.cpp
 spec: db
 	rspec
 
+# Insert N rows into a fresh test.db, then select them: make demo N=20
+N ?= 15
+demo: db
+	rm -f test.db
+	for i in $$(seq 1 $(N)); do echo "insert $$i user$$i person$$i@example.com"; done \
+		| { cat; echo select; echo .exit; } | ./db test.db
+
 %.o: %.cpp log.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -rf baobab baobab_test db *.o *.dSYM
+	rm -rf baobab baobab_test db test.db *.o *.dSYM
 
-.PHONY: test spec clean
+.PHONY: test spec demo clean
