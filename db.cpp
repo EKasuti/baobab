@@ -90,7 +90,9 @@ const uint8_t COMMON_NODE_HEADER_SIZE = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_P
  */
 const uint32_t LEAF_NODE_NUM_CELLS_SIZE = sizeof(uint32_t);
 const uint32_t LEAF_NODE_NUM_CELLS_OFFSET = COMMON_NODE_HEADER_SIZE;
-const uint32_t LEAF_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE;
+const uint32_t LEAF_NODE_NEXT_LEAF_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_NEXT_LEAF_OFFSET = LEAF_NODE_NUM_CELLS_OFFSET + LEAF_NODE_NUM_CELLS_SIZE;
+const uint32_t LEAF_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE + LEAF_NODE_NEXT_LEAF_SIZE;
 
 /*
  * Leaf Node Body Layout
@@ -204,6 +206,10 @@ uint32_t get_node_max_key(void* node) {
     return 0;
 }
 
+uint32_t* leaf_node_next_leaf(void* node) {
+    return (u_int32_t*)((char*)node + LEAF_NODE_NEXT_LEAF_OFFSET);
+}
+
 bool is_node_root(void* node) {
     uint8_t value = *((uint8_t*)((char*)node + IS_ROOT_OFFSET));
     return (bool)value;
@@ -218,6 +224,7 @@ void initialize_leaf_node(void* node) {
     set_node_type(node, NODE_LEAF);
     set_node_root(node, false);
     *leaf_node_num_cells(node) = 0;
+    *leaf_node_next_leaf(node) = 0;
 }
 
 void initialize_internal_node(void* node) {
@@ -409,7 +416,14 @@ void cursor_advance(Cursor* cursor) {
 
     cursor->cell_num += 1;
     if (cursor->cell_num >= (*leaf_node_num_cells(node))) {
-        cursor->end_of_table = true;
+        uint32_t next_page_num = *leaf_node_next_leaf(node);
+        if (next_page_num == 0){
+            // this was the right most leaf
+            cursor->end_of_table = true;
+        } else {
+            cursor->page_num = next_page_num;
+            cursor->cell_num = 0;
+        }
     }
 }
 
@@ -641,6 +655,8 @@ void leaf_node_split_and_insert(Cursor* cursor, uint32_t key, Row* value) {
     uint32_t new_page_num = get_unused_page_num(cursor->table->pager);
     void* new_node = get_page(cursor->table->pager, new_page_num);
     initialize_leaf_node(new_node);
+    *leaf_node_next_leaf(new_node) = *leaf_node_next_leaf(old_node);
+    *leaf_node_next_leaf(old_node) = new_page_num;
 
     /*
     All existing keys plus new key should be divided
